@@ -321,7 +321,10 @@ fn parse(spec: &ToolSpec, args: &[String]) -> anyhow::Result<ParseResult> {
                         }
                         None => Value::Bool(true),
                     },
-                    None => bail!("--{flag} needs a value; see `browse {name} --help`"),
+                    None => {
+                        let raw = take(&mut i).with_context(|| format!("--{flag} needs a value; see `browse {name} --help`"))?;
+                        coerce(flag, schema, raw)?
+                    }
                 };
                 arguments.insert(key, value);
             }
@@ -513,6 +516,31 @@ mod tests {
         let parsed = parse_arguments(&navigate, &["--readOnly", "https://example.com"]).unwrap();
         assert_eq!(parsed.get("readOnly"), Some(&json!(true)));
         assert_eq!(parsed.get("url"), Some(&json!("https://example.com")));
+    }
+
+    #[test]
+    fn options_take_a_space_separated_value() {
+        let execute = named(
+            "execute",
+            json!({
+                "properties": {
+                    "code": { "type": "string" },
+                    "timeoutMs": { "type": "integer" },
+                    "tab": { "type": ["integer", "string"] }
+                },
+                "required": ["code"]
+            }),
+        );
+        let parsed = parse_arguments(&execute, &["--tab", "687196149", "--timeoutMs", "60000", "--code", "return 1"]).unwrap();
+        assert_eq!(parsed.get("code"), Some(&json!("return 1")));
+        assert_eq!(parsed.get("timeoutMs"), Some(&json!(60000)));
+        assert_eq!(parsed.get("tab"), Some(&json!(687196149)));
+
+        let parsed = parse_arguments(&execute, &["--code", "-1"]).unwrap();
+        assert_eq!(parsed.get("code"), Some(&json!("-1")));
+
+        let error = parse_arguments(&execute, &["--code", "--tab", "7"]).unwrap_err().to_string();
+        assert!(error.contains("--code needs a value"), "{error}");
     }
 
     #[test]
